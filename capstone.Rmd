@@ -1,0 +1,238 @@
+---
+title: "Gait Analyzer"
+resource_files:
+- .Rprofile
+- model.pkl
+- modelstats.npy
+runtime: shiny
+output:
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    theme: united
+---
+
+```{r setup, echo = FALSE, warning = FALSE, include = FALSE}
+library(shiny)
+library(tidyverse)
+library(plotly)
+reticulate::virtualenv_create(envname = "gait_analyze", python="python3")
+reticulate::virtualenv_install("gait_analyze", packages =
+                                c('pandas','numpy','scipy','scikit-learn','glob2'))
+reticulate::use_virtualenv("gait_analyze", required = TRUE)
+```
+
+```{r global, echo = FALSE, warning = FALSE, include = FALSE}
+#read and evaluate python script to obtain model's prediction stats
+reticulate::source_python("get_model_stats.py")
+overall = get_model_stats()
+train_acc = overall[[2]]
+test_acc = overall[[1]]
+ideal_rand = overall[[3]]
+true_ind = overall[[4]]
+```
+
+Prediction Tool
+=======================================================================
+
+Inputs {.sidebar}
+-----------------------------------------------------------------------
+
+```{r}
+# user can select a file from either the given gait_data folder of given data, or their own data
+ fileInput("file", label = h4("Please select a text file from the gait_data directory"))
+# there are 12 different waveform features that the user can view per file, here they select which one they are interested in viewing 
+ radioButtons("waveform", label = h4("Select which waveform data to view"), 
+                  choices = list("Left Stride Interval" = "lstride", "Right Stride Interval" 
+                                 = "rstride", "Left Swing Interval" = "lswing", "Right Swing
+                                 Interval" = "rswing", "Left Swing Interval (%)" = "lswing_int",
+                                 "Right Swing Interval (%)" = "rswing_int", "Left Stance
+                                 Interval" = "lstance", "Right Stance Interval" = "rstance",
+                                 "Left Stance Interval (%)" = "lstance_int", "Right Stance 
+                                 Interval (%)" = "rstance_int", "Double Support Interval" = 
+                                 "dsupport", "Double Support Interval (%)" = "dsupport_int"), 
+                  selected = "lstride")
+```
+
+Row {data-height=700, .tabset}
+-----------------------------------------------------------------------
+
+### Raw Data
+
+```{r}
+#plotting the raw form of the waveform data chosen by the user for a selected gait time series data file
+uiOutput("dynamic")
+#created function for using the name of selected file to read in file's data
+FileDF = function(filename) {
+  file = read.table(filename$datapath)
+  keys = c('time', 'lstride', 'rstride', 'lswing', 'rswing', 'lswing_int', 'rswing_int',
+            'lstance', 'rstance', 'lstance_int', 'rstance_int', 'dsupport', 'dsupport_int')
+  colnames(file) = keys
+  return(file)
+}
+#make sure file is one of the txt data files 
+output$dynamic <- renderUI({
+  if (!is.null(input$file)) {
+    filename = input$file
+    if (str_detect(filename$name, ".txt")) {
+      if ((str_detect(filename$name,"als")) || (str_detect(filename$name, "park")) ||
+        (str_detect(filename$name, "hunt")) || (str_detect(filename$name, "control")) ||
+        (str_detect(filename$name, "test"))) {
+          plotlyOutput("plot")
+        } else textOutput("invalidtxt")
+      }
+    else textOutput("invalidtxt")
+  }
+  else textOutput("text")
+})
+#plot the raw data
+output$plot <- renderPlotly({
+  
+                  p = ggplot(FileDF(input$file), aes_string(x = "time", y = input$waveform)) + xlab("Time (sec)") + geom_line()
+                  print(p)
+                })
+output$text <- renderText({ "No file selected" })
+output$invalidtxt <- renderText({"Invalid file selected"})
+```
+
+### Processed Data
+
+```{r}
+# plotting the processed form of the waveform data chosen by the user for a selected gait time series data file
+uiOutput("dynamic2")
+#created a function for data pre-processing
+ProcessDF = function(filename) {
+  #read in data from the file selected by the user
+  file = read.table(filename$datapath)
+  keys = c('time', 'lstride', 'rstride', 'lswing', 'rswing', 'lswing_int', 'rswing_int',
+            'lstance', 'rstance', 'lstance_int', 'rstance_int', 'dsupport', 'dsupport_int')
+  colnames(file) = keys
+  processed = file
+  #create a column with normalized time, starting from 0
+  normTime = 0
+  time1 = as.numeric(unlist(processed$time))
+  for (i in seq(1, length(time1)-1)) {
+    normTime = append(normTime, time1[i]-time1[1])
+  } 
+  processed$normTime = normTime
+  #use mean imputation to replace outlier points in the waveform
+  for (key in keys) {
+        temp = as.numeric(unlist(processed[key]))
+        z = abs(temp - mean(temp))/sd(temp)
+        ind = which(z > 3)
+        temp[ind] = mean(temp)
+        processed[key] = temp
+  }
+  processed <- processed %>% select(-'time')
+  return(processed)
+}
+#make sure file is one of the txt data files
+output$dynamic2 <- renderUI({
+  if (!is.null(input$file)) {
+    filename = input$file
+    if (str_detect(filename$name, ".txt")) {
+      if ((str_detect(filename$name,"als")) || (str_detect(filename$name, "park")) ||
+        (str_detect(filename$name, "hunt")) || (str_detect(filename$name, "control")) ||
+        (str_detect(filename$name, "test"))) {
+          plotlyOutput("plot2")
+        } else textOutput("invalidtxt2")
+      }
+    else textOutput("invalidtxt2")
+  }
+  else textOutput("text2")
+})
+#plot processed data, also plotted vertical lines to symbolize where statistical features were calculated for each 30 second time zone.
+output$plot2 <- renderPlotly({
+                  p = ggplot(ProcessDF(input$file), aes_string(x = "normTime", y = input$waveform)) + xlab("Normalized Time (sec)") + geom_line() + geom_vline(xintercept =  c(0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300), color = "blue", linetype = "dashed")
+                  print(p)
+                })
+output$text2 <- renderText({ "No file selected" })
+output$invalidtxt2 <- renderText({"Invalid file selected"})
+```
+
+Row {data-height=300}
+-----------------------------------------------------------------------
+
+### Final Prediction
+
+Note: The prediction shown is based off the entire file, not just the selected component.
+
+```{r}
+#read and evaluate python script to obtain model's prediction for the uploaded data
+uiOutput("final")
+getPred = function(filename) {
+  file = read.table(filename$datapath)
+  keys = c('time', 'lstride', 'rstride', 'lswing', 'rswing', 'lswing_int', 'rswing_int',
+            'lstance', 'rstance', 'lstance_int', 'rstance_int', 'dsupport', 'dsupport_int')
+  colnames(file) = keys
+  processed = file
+  normTime = 0
+  time1 = as.numeric(unlist(processed$time))
+  for (i in seq(1, length(time1)-1)) {
+    normTime = append(normTime, time1[i]-time1[1])
+  } 
+  processed$normTime = normTime
+  for (key in keys) {
+        temp = as.numeric(unlist(processed[key]))
+        z = abs(temp - mean(temp))/sd(temp)
+        ind = which(z > 3)
+        temp[ind] = mean(temp)
+        processed[key] = temp
+  }
+  reticulate::source_python("get_model_pred.py")
+  prediction = get_model_pred(as.data.frame(processed), true_ind)
+  return(prediction)
+}
+output$final <- renderUI({
+  if (!is.null(input$file)) {
+    filename = input$file
+    if (str_detect(filename$name, ".txt")) {
+      if ((str_detect(filename$name,"als")) || (str_detect(filename$name, "park")) ||
+        (str_detect(filename$name, "hunt")) || (str_detect(filename$name, "control")) ||
+        (str_detect(filename$name, "test"))) {
+          textOutput("predtxt")
+        } else textOutput("invalidtext")
+      }
+    else textOutput("invalidtext")
+  }
+  else textOutput("txt")
+})
+#print prediction for user
+output$predtxt <- renderText({paste("Based on this file, we predict that
+                                    the subject",getPred(input$file))})
+output$txt <- renderText({ "No file selected" })
+output$invalidtext <- renderText({"Invalid file selected"})
+```
+
+
+About
+=======================================================================
+
+#### Overview
+
+Welcome to the Gait Analyzer tool! Certain neurological disorders can impact the way a person walks. Here, we look at gait readings from force-sensitive resistors to predict whether a person has ALS, Parkinson's, Huntington's, or none of the above. To learn more about the dataset we used, visit https://www.physionet.org/content/gaitndd/1.0.0/ 
+
+#### Model Development
+
+We have trained and saved a Random Forest model to make predictions. The train accuracy of the model is: `r train_acc` and the test accuracy of the model is: `r test_acc`. 
+Before running the data through the model, we preprocessed the data (removed outliers) and split the time series into 30-second windows. For each waveform, we extracted the mean, variance, median, and range from the overall series and from each time window, resulting in approximately 500 features. We then used PCA to select 5-6 features to isolate and train our model on. 
+
+If you wish to reproduce our results, download the gait_data directory and the `get_model_stats.py` file. Then, run the `build_model` function within the file. Make sure to check the [associated README file](https://github.com/ds4ph-bme/capstone-project-ananyas713/tree/main), which contains a list of required libraries.
+
+#### Figure Descriptions
+
+For any file uploaded, we generate two plots: the first shows the raw data, and the second shows the processed data. The raw data plot is fairly self-explanatory. The processed data plot involves manipulating the timestamps so that each waveform starts at 0 seconds. It also involves replacing outliers (points that are 3 standard deviations away from the mean) with the mean of the time series. Lastly, using the blue dashed lines, we show how we split the time series into 30-second windows. 
+
+<br>
+
+#### Instructions
+
+You can select one of the provided text files (in the gait_data directory) to see how we process the data and make predictions. The sidebar on the left allows you to select which waveform to view. 
+If you want to upload your own data, please make sure the format is the same as the examples provided. In order for this tool to work, you *must* have your data in the .txt file format, and the file itself has to include "test" in the name. 
+
+**Important**: Please see the information under "Disclaimer" *before* uploading your own data. 
+
+#### Disclaimer
+
+This tool was created for the Advanced Data Science for Biomedical Engineering Course (EN.580.464/EN.580.664) and HAS NOT been scientifically validated. This app is not meant to provide any definitive diagnoses, nor does it reflect the views of the Johns Hopkins University, the Johns Hopkins Hospital, or any of their affiliates. If you have any concerns relating to your gait, please consult a professional instead of relying on what this app says. 
+
+Furthermore, the model we are using has been trained and tested on a very small number of samples (48 and 16, respectively). Therefore, the accuracy provided may not be representative of how our model would perform in a real-world setting. 
