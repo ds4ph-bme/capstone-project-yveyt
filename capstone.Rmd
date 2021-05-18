@@ -216,7 +216,7 @@ Welcome to the Gait Analyzer tool! Certain neurological disorders can impact the
 We have trained and saved a Random Forest model to make predictions. The train accuracy of the model is: `r train_acc` and the test accuracy of the model is: `r test_acc`. 
 Before running the data through the model, we preprocessed the data (removed outliers) and split the time series into 30-second windows. For each waveform, we extracted the mean, variance, median, and range from the overall series and from each time window, resulting in approximately 500 features. We then used PCA to select 5-6 features to isolate and train our model on. 
 
-If you wish to reproduce our results, download the gait_data directory and the `get_model_stats.py` file. Then, run the `build_model` function within the file. Make sure to check the [associated README file](https://github.com/ds4ph-bme/capstone-project-ananyas713/tree/main), which contains a list of required libraries.
+If you wish to reproduce our results, download the gait_data directory and the `get_model_stats.py` file. Then, run the `build_model` function within the file. Make sure to check the [associated README file](https://github.com/ds4ph-bme/capstone-project-yveyt/blob/main/README.md), which contains a list of required libraries.
 
 #### Figure Descriptions
 
